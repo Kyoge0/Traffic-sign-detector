@@ -90,23 +90,28 @@ class Window(QtWidgets.QWidget):
         pass
 
     def handleSaveFile(self):
-        # options = QtWidgets.QFileDialog.Options()
-        # options |= QtWidgets.QFileDialog.DontUseNativeDialog
-        if self._path is not None:
-            fileName, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File", ".", "Images(*.jpg *.png)")
-            print(fileName)
-            cv2.imwrite(fileName + ".png", self.OpenCV_image2,)
+        if self.OpenCV_image2 is not None:
+            defaultname = "example.png"
 
+            fileName, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save File", defaultname,
+                                                                "Images(*.jpg *.png)")
+
+            if fileName:
+                if not fileName.endswith(('.png', '.jpg')):
+                    fileName += ".png"
+                cv2.imwrite(fileName, self.OpenCV_image2)
+                
 
     def handleOpen(self):
         start = "."
 
         path = QtWidgets.QFileDialog.getOpenFileName(self, "Choose File", start, "Images(*.jpg *.png)")[0]
         #self.FilePath = path + ".txt"
-        print(path)
-        if path is not None:
+        if path:
             self._path = path
             self.ActualizarImagen()
+        else:
+            print("non") #añadir una advertencia que el path no vale verga
     
     def detectSigns(self):
         if self.OpenCV_image is None:
