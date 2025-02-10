@@ -100,6 +100,7 @@ class Window(QtWidgets.QWidget):
             print("non") #añadir una advertencia que el path no vale verga
 
     def detectSigns(self):
+        global color_detected, color_thresholds
         if self.OpenCV_image is None:
             QMessageBox.warning(self, "Error", "Aun no has cargado una imagen")
             return
@@ -125,7 +126,8 @@ class Window(QtWidgets.QWidget):
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < 200:
+            flag = False
+            if area <= 50:
                 continue
 
             perimeter = cv2.arcLength(contour, True)
@@ -138,25 +140,29 @@ class Window(QtWidgets.QWidget):
                 shape = "triangulo"
             elif vertices == 4:
                 x, y, w, h = cv2.boundingRect(approx)
-                aspect_ratio = float(w) / h
                 shape = "rombo/cuadrado"
             elif 8 <= vertices <= 10:
                 shape = "octagonon"
             else:
-                continue
+                shape = "unknown"
+                #continue
 
             contour_mask = np.zeros_like(gray)
             cv2.drawContours(contour_mask, [contour], -1, 255, -1)
 
             # Calcular superposición con máscaras de color
-            color_detected = None
-            color_thresholds = {
-                "red": 0.1,
-                "blue": 0.7,
-                "yellow": 0.7,
-                "bluetooth": 0.2,
-                "red2": 0.001 #perramadre
-            }
+            if  area < 300:  # Figuras pequeñas (naranja)
+                flag = True
+                color = (0, 165, 255)  # Naranja en BGR
+            else:
+                color_detected = None
+                color_thresholds = {
+                    "red": 0.1,
+                    "blue": 0.7,
+                    "yellow": 0.7,
+                    "bluetooth": 0.2,
+                    "red2": 0.001  # perramadre
+                }
 
             for color_name, color_mask in [("red", mask_red), ("blue", mask_blue), ("yellow", mask_yellow), ("bluetooth", mask_blue), ("red2", mask_red)]:
                 overlap = cv2.bitwise_and(contour_mask, color_mask)
@@ -166,18 +172,27 @@ class Window(QtWidgets.QWidget):
                     color_detected = color_name
                     break
 
-            if color_detected:
-                M = cv2.moments(contour)
-                if M["m00"] != 0:
-                    cX = int(M["m10"] / M["m00"])
-                    cY = int(M["m01"] / M["m00"])
+            # if color_detected:
+            #     M = cv2.moments(contour)
+            #     if M["m00"] != 0:
+            #         cX = int(M["m10"] / M["m00"])
+            #         cY = int(M["m01"] / M["m00"])
+            #
+            #         # punto central & cuadradiño
+            #         cv2.circle(self.OpenCV_image2, (cX, cY), 5, (0, 0, 255), -1)
+            #         x, y, w, h = cv2.boundingRect(contour)
+            #         cv2.rectangle(self.OpenCV_image2, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            #
+            #         print(f"Detected: {color_detected} {shape} at ({cX}, {cY})")
+            if color_detected and not flag:  # Coincide con un color permitido (verde)
+                color = (0, 255, 0)  # Verde en BGR
+            elif not color_detected and not flag:  # No coincide con ningún color permitido (rojo)
+                color = (0, 0, 255)  # Rojo en BGR
 
-                    cv2.circle(self.OpenCV_image2, (cX, cY), 5, (0, 0, 255), -1) #punto central
-
-                    x, y, w, h = cv2.boundingRect(contour) # envolver coso
-                    cv2.rectangle(self.OpenCV_image2, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                    print(f"Detected: {color_detected} {shape} at ({cX}, {cY})")
+            # Dibujar el contorno y etiquetar la forma
+            x, y, w, h = cv2.boundingRect(contour)
+            cv2.rectangle(self.OpenCV_image2, (x, y), (x + w, y + h), color, 2)
+            cv2.putText(self.OpenCV_image2, shape, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
 
         self.ActualizarPixMap2(self.OpenCV_image2)
 
