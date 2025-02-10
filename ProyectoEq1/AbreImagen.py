@@ -3,7 +3,7 @@ import sys
 import numpy as np
 from PyQt6 import QtWidgets, QtGui
 from PyQt6.QtCore import pyqtSignal, QSize
-from PyQt6.QtWidgets import QHBoxLayout
+from PyQt6.QtWidgets import QHBoxLayout, QMessageBox
 
 
 class MiEtiqueta(QtWidgets.QLabel):
@@ -11,20 +11,6 @@ class MiEtiqueta(QtWidgets.QLabel):
         super().__init__()
         self.Lista = []
         self.setStyleSheet("border: 1px solid black;")
-
-    clicked = pyqtSignal()
-
-    def mousePressEvent(self, e):
-        self.x = e.position().x()
-        self.y = e.position().y()
-        # self.center = e.pos()
-        # self.Lista.append(e.pos())
-        # print (type(e.pos()), str(self.x)+","+str(self.y))
-        # self.Lista.append([self.x,self.y])
-        self.Lista.append((self.x, self.y))
-
-        print(self.Lista)
-        self.clicked.emit()
 
 class Window(QtWidgets.QWidget):
 
@@ -42,11 +28,10 @@ class Window(QtWidgets.QWidget):
         super().__init__()
         self.OpenCV_image = None
         self.OpenCV_image2 = None
-        self.setGeometry(10, 10, 900, 600)
+        self.setGeometry(10, 10, 1200, 900)
         self.center()
 
         self._path = None
-        self.LastPoint = None
 
         self.viewer = MiEtiqueta()
         self.viewer2 = MiEtiqueta()
@@ -66,7 +51,7 @@ class Window(QtWidgets.QWidget):
         self.guardarImagen.clicked.connect(self.handleSaveFile)
 
         layout = QtWidgets.QGridLayout(self)
-        self.botonProcesaReservado = QtWidgets.QPushButton("Reserved")
+        self.botonProcesaReservado = QtWidgets.QPushButton("Buscar Señales de Trafico")
         # self.botonProcesaReservado.setText("Marker Ratio")
         # self.botonProcesaReservado.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.botonProcesaReservado.setMinimumSize(BUTTON_SIZE)
@@ -100,7 +85,8 @@ class Window(QtWidgets.QWidget):
                 if not fileName.endswith(('.png', '.jpg')):
                     fileName += ".png"
                 cv2.imwrite(fileName, self.OpenCV_image2)
-                
+        else:
+            QMessageBox.warning(self, "Error", "No hay nada que guardar aun")
 
     def handleOpen(self):
         start = "."
@@ -112,40 +98,88 @@ class Window(QtWidgets.QWidget):
             self.ActualizarImagen()
         else:
             print("non") #añadir una advertencia que el path no vale verga
-    
+
     def detectSigns(self):
         if self.OpenCV_image is None:
+            QMessageBox.warning(self, "Error", "Aun no has cargado una imagen")
             return
 
         self.OpenCV_image2 = self.OpenCV_image.copy()
-        
         hsv = cv2.cvtColor(self.OpenCV_image, cv2.COLOR_BGR2HSV)
-        
-        # Define color ranges for traffic signs (red, blue, yellow)
+
         lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
         lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
         lower_blue, upper_blue = np.array([100, 150, 50]), np.array([140, 255, 255])
         lower_yellow, upper_yellow = np.array([15, 100, 100]), np.array([35, 255, 255])
-        
-        # Create masks
+
         mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(hsv, lower_red2, upper_red2)
         mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
-        
-        # Find contours for each color
-        self.findContoursAndDraw(mask_red, (0, 0, 255))  # Red
-        self.findContoursAndDraw(mask_blue, (255, 0, 0))  # Blue
-        self.findContoursAndDraw(mask_yellow, (0, 255, 255))  # Yellow
-        
-        self.ActualizarPixMap2(self.OpenCV_image2)
 
-    def findContoursAndDraw(self, mask, color):
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # formas & filtros
+        gray = cv2.cvtColor(self.OpenCV_image, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 50, 150)
+
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > 500:  # Filter out small noise
-                x, y, w, h = cv2.boundingRect(contour)
-                cv2.rectangle(self.OpenCV_image2, (x, y), (x+w, y+h), color, 2)
+            if area < 200:
+                continue
+
+            perimeter = cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, 0.04 * perimeter, True)
+            vertices = len(approx)
+
+            # check forma
+            shape = None
+            if vertices == 3:
+                shape = "triangulo"
+            elif vertices == 4:
+                x, y, w, h = cv2.boundingRect(approx)
+                aspect_ratio = float(w) / h
+                shape = "rombo/cuadrado"
+            elif 8 <= vertices <= 10:
+                shape = "octagonon"
+            else:
+                continue
+
+            contour_mask = np.zeros_like(gray)
+            cv2.drawContours(contour_mask, [contour], -1, 255, -1)
+
+            # Calcular superposición con máscaras de color
+            color_detected = None
+            color_thresholds = {
+                "red": 0.1,
+                "blue": 0.7,
+                "yellow": 0.7,
+                "bluetooth": 0.2,
+                "red2": 0.001 #perramadre
+            }
+
+            for color_name, color_mask in [("red", mask_red), ("blue", mask_blue), ("yellow", mask_yellow), ("bluetooth", mask_blue), ("red2", mask_red)]:
+                overlap = cv2.bitwise_and(contour_mask, color_mask)
+                overlap_area = cv2.countNonZero(overlap)
+
+                if overlap_area / area > color_thresholds[color_name]:
+                    color_detected = color_name
+                    break
+
+            if color_detected:
+                M = cv2.moments(contour)
+                if M["m00"] != 0:
+                    cX = int(M["m10"] / M["m00"])
+                    cY = int(M["m01"] / M["m00"])
+
+                    cv2.circle(self.OpenCV_image2, (cX, cY), 5, (0, 0, 255), -1) #punto central
+
+                    x, y, w, h = cv2.boundingRect(contour) # envolver coso
+                    cv2.rectangle(self.OpenCV_image2, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                    print(f"Detected: {color_detected} {shape} at ({cX}, {cY})")
+
+        self.ActualizarPixMap2(self.OpenCV_image2)
 
     def ActualizarPixMap(self):
         QImageTemp = QtGui.QImage(cv2.cvtColor(self.OpenCV_image, cv2.COLOR_BGR2RGB), self.OpenCV_image.shape[1],
@@ -180,7 +214,7 @@ class Window(QtWidgets.QWidget):
         self.viewer.setPixmap(pixmap)
         self.viewer2.setPixmap(pixmap)
 
-        
+
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
