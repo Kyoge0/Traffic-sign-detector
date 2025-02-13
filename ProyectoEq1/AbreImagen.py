@@ -101,6 +101,8 @@ class Window(QtWidgets.QWidget):
 
     def detectSigns(self):
         global color_detected, color_thresholds
+        color_detected = ""
+        color_thresholds = ""
         if self.OpenCV_image is None:
             QMessageBox.warning(self, "Error", "Aun no has cargado una imagen")
             return
@@ -119,8 +121,14 @@ class Window(QtWidgets.QWidget):
 
         # formas & filtros
         gray = cv2.cvtColor(self.OpenCV_image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.bitwise_not(gray)
+        cv2.imshow("Gray", gray)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blurred, 50, 150)
+        th, dst= cv2.threshold(blurred,27,255, 1)
+
+        cv2.imshow("thresh", dst)
+        edges = cv2.Canny(dst, 50, 150)
+        cv2.imshow("imagen", edges)
 
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -145,6 +153,7 @@ class Window(QtWidgets.QWidget):
                 shape = "octagonon"
             else:
                 shape = "unknown"
+                print(vertices)
                 #continue
 
             contour_mask = np.zeros_like(gray)
@@ -156,13 +165,14 @@ class Window(QtWidgets.QWidget):
                 color = (0, 165, 255)  # Naranja en BGR
             else:
                 color_detected = None
-                color_thresholds = {
-                    "red": 0.1,
-                    "blue": 0.7,
-                    "yellow": 0.7,
-                    "bluetooth": 0.2,
-                    "red2": 0.001  # perramadre
-                }
+
+            color_thresholds = {
+                "red": 0.1,
+                "blue": 0.7,
+                "yellow": 0.7,
+                "bluetooth": 0.2,
+                "red2": 0.001  # perramadre
+            }
 
             for color_name, color_mask in [("red", mask_red), ("blue", mask_blue), ("yellow", mask_yellow), ("bluetooth", mask_blue), ("red2", mask_red)]:
                 overlap = cv2.bitwise_and(contour_mask, color_mask)
