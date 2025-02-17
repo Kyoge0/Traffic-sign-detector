@@ -26,15 +26,20 @@ class Window(QtWidgets.QWidget):
 
     def __init__(self):
         super().__init__()
+        self.OpenCV_image3 = None
         self.OpenCV_image = None
         self.OpenCV_image2 = None
-        self.setGeometry(10, 10, 1200, 900)
         self.center()
 
         self._path = None
 
         self.viewer = MiEtiqueta()
         self.viewer2 = MiEtiqueta()
+        self.viewer.setFixedSize(840, 680)
+        self.viewer2.setFixedSize(840, 680)
+        self.viewer.setScaledContents(True)
+        self.viewer2.setScaledContents(True)
+
         self.buttonOpen = QtWidgets.QPushButton("Open Image")
         BUTTON_SIZE = QSize(200, 50)
         self.buttonOpen.setMinimumSize(BUTTON_SIZE)
@@ -100,131 +105,151 @@ class Window(QtWidgets.QWidget):
             print("non") #añadir una advertencia que el path no vale verga
 
     def detectSigns(self):
-        global color_detected, color_thresholds
         if self.OpenCV_image is None:
-            QMessageBox.warning(self, "Error", "Aun no has cargado una imagen")
+            QMessageBox.warning(self, "Error", "Aún no has cargado una imagen")
             return
 
         self.OpenCV_image2 = self.OpenCV_image.copy()
-        hsv = cv2.cvtColor(self.OpenCV_image, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(self.OpenCV_image2, cv2.COLOR_BGR2HSV)
 
-        lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
-        lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
-        lower_blue, upper_blue = np.array([100, 150, 50]), np.array([140, 255, 255])
-        lower_yellow, upper_yellow = np.array([15, 100, 100]), np.array([35, 255, 255])
+        # Improved color ranges with better sensitivity
+        lower_red1, upper_red1 = np.array([0, 100, 100]), np.array([10, 255, 255])
+        lower_red2, upper_red2 = np.array([160, 100, 100]), np.array([180, 255, 255])
+        lower_blue = np.array([85, 100, 50])
+        upper_blue = np.array([130, 255, 255])
+        lower_yellow = np.array([20, 100, 100])
+        upper_yellow = np.array([40, 255, 255])
 
+        # Enhanced morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(hsv, lower_red2, upper_red2)
+        mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, kernel)
+        mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
+
         mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
+        mask_blue = cv2.morphologyEx(mask_blue, cv2.MORPH_CLOSE, kernel)
+
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+        mask_yellow = cv2.morphologyEx(mask_yellow, cv2.MORPH_CLOSE, kernel)
 
-        # formas & filtros
-        gray = cv2.cvtColor(self.OpenCV_image, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blurred, 50, 150)
+        # Combine masks for better edge detection
+        combined_mask = cv2.bitwise_or(mask_red, cv2.bitwise_or(mask_blue, mask_yellow))
 
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Improved edge detection with blurring
+        gray = cv2.cvtColor(self.OpenCV_image2, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray_clahe = clahe.apply(gray)
+        edges = cv2.Canny(gray_clahe, 50, 150)
+
+        # Combine edges with color information
+        combined_edges = cv2.bitwise_and(edges, combined_mask)
+
+        # Find contours from combined edges
+        contours, _ = cv2.findContours(combined_edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Shape detection parameters
+        min_area = 500
+        max_area = 50000
+        aspect_ratio_range = (0.8, 1.2)
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            flag = False
-            if area <= 50:
+            if area < min_area or area > max_area:
                 continue
 
-            perimeter = cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, 0.04 * perimeter, True)
+            # Contour approximation with dynamic epsilon
+            epsilon = 0.02 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
             vertices = len(approx)
 
-            # check forma
-            shape = None
-            if vertices == 3:
-                shape = "triangulo"
-            elif vertices == 4:
-                x, y, w, h = cv2.boundingRect(approx)
-                shape = "rombo/cuadrado"
-            elif 8 <= vertices <= 10:
-                shape = "octagonon"
-            else:
-                shape = "unknown"
-                #continue
+            # Shape classification with aspect ratio
+            (x, y, w, h) = cv2.boundingRect(approx)
+            aspect_ratio = w / float(h)
 
+            shape = "unknown"
+            if vertices == 3:
+                shape = "triangle"
+            elif vertices == 4:
+                if 0.8 <= aspect_ratio <= 1.2:
+                    shape = "square"
+                else:
+                    shape = "rectangle"
+            elif 6 <= vertices <= 10:
+                shape = "octagon"
+
+
+            # Color detection with improved thresholding
             contour_mask = np.zeros_like(gray)
             cv2.drawContours(contour_mask, [contour], -1, 255, -1)
 
-            # Calcular superposición con máscaras de color
-            if  area < 300:  # Figuras pequeñas (naranja)
-                flag = True
-                color = (0, 165, 255)  # Naranja en BGR
-            else:
-                color_detected = None
-                color_thresholds = {
-                    "red": 0.1,
-                    "blue": 0.7,
-                    "yellow": 0.7,
-                    "bluetooth": 0.2,
-                    "red2": 0.001  # perramadre
-                }
+            color_scores = {
+                "red": cv2.countNonZero(cv2.bitwise_and(mask_red, contour_mask)) / area,
+                "blue": cv2.countNonZero(cv2.bitwise_and(mask_blue, contour_mask)) / area,
+                "yellow": cv2.countNonZero(cv2.bitwise_and(mask_yellow, contour_mask)) / area
+            }
 
-            for color_name, color_mask in [("red", mask_red), ("blue", mask_blue), ("yellow", mask_yellow), ("bluetooth", mask_blue), ("red2", mask_red)]:
-                overlap = cv2.bitwise_and(contour_mask, color_mask)
-                overlap_area = cv2.countNonZero(overlap)
+            color_detected = max(color_scores, key=color_scores.get)
+            min_color_threshold = 0.1  # Adjusted threshold
 
-                if overlap_area / area > color_thresholds[color_name]:
-                    color_detected = color_name
-                    break
+            if color_scores[color_detected] < min_color_threshold:
+                continue
 
-            # if color_detected:
-            #     M = cv2.moments(contour)
-            #     if M["m00"] != 0:
-            #         cX = int(M["m10"] / M["m00"])
-            #         cY = int(M["m01"] / M["m00"])
-            #
-            #         # punto central & cuadradiño
-            #         cv2.circle(self.OpenCV_image2, (cX, cY), 5, (0, 0, 255), -1)
-            #         x, y, w, h = cv2.boundingRect(contour)
-            #         cv2.rectangle(self.OpenCV_image2, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            #
-            #         print(f"Detected: {color_detected} {shape} at ({cX}, {cY})")
-            if color_detected and not flag:  # Coincide con un color permitido (verde)
-                color = (0, 255, 0)  # Verde en BGR
-            elif not color_detected and not flag:  # No coincide con ningún color permitido (rojo)
-                color = (0, 0, 255)  # Rojo en BGR
+            # Final verification
+            if shape == "unknown":
+                continue
 
-            # Dibujar el contorno y etiquetar la forma
-            x, y, w, h = cv2.boundingRect(contour)
-            cv2.rectangle(self.OpenCV_image2, (x, y), (x + w, y + h), color, 2)
-            cv2.putText(self.OpenCV_image2, shape, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+            # Draw results
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+
+                cv2.drawContours(self.OpenCV_image2, [approx], -1, (0, 255, 0), 2)
+                label = f"{color_detected} {shape}"
+                cv2.putText(self.OpenCV_image2, label, (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         self.ActualizarPixMap2(self.OpenCV_image2)
 
     def ActualizarPixMap(self):
-        QImageTemp = QtGui.QImage(cv2.cvtColor(self.OpenCV_image, cv2.COLOR_BGR2RGB), self.OpenCV_image.shape[1],
-                                  self.OpenCV_image.shape[0], self.OpenCV_image.shape[1] * 3,
-                                  QtGui.QImage.Format.Format_RGB888)
-
-        pixmap = QtGui.QPixmap(QImageTemp)
-        self.viewer.setPixmap(pixmap)
+        display_width = self.viewer.width()
+        display_height = self.viewer.height()
+        resized = cv2.resize(self.OpenCV_image3, (display_width, display_height), interpolation=cv2.INTER_LINEAR)
+        QImageTemp = QtGui.QImage(
+            cv2.cvtColor(resized, cv2.COLOR_BGR2RGB),
+            resized.shape[1],
+            resized.shape[0],
+            resized.shape[1] * 3,
+            QtGui.QImage.Format.Format_RGB888
+        )
+        self.viewer.setPixmap(QtGui.QPixmap(QImageTemp))
 
     def ActualizarPixMap2(self, image):
-        QImageTemp = QtGui.QImage(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), image.shape[1], image.shape[0],
-                                  image.shape[1] * 3, QtGui.QImage.Format.Format_RGB888)
-
-        pixmap = QtGui.QPixmap(QImageTemp)
-        self.viewer2.setPixmap(pixmap)
+        display_width = self.viewer2.width()
+        display_height = self.viewer2.height()
+        resized_image = cv2.resize(image, (display_width, display_height), interpolation=cv2.INTER_LINEAR)
+        qimage = QtGui.QImage(
+            cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB),
+            resized_image.shape[1],
+            resized_image.shape[0],
+            resized_image.shape[1] * 3,
+            QtGui.QImage.Format.Format_RGB888
+        )
+        self.viewer2.setPixmap(QtGui.QPixmap(qimage))
 
     def ActualizarImagen(self):
-
         self.OpenCV_image = cv2.imread(self._path)
-        Tamano = (self.viewer.size().width(), self.viewer.size().height())
-        print(self.viewer.size(), type(self.viewer.size()), Tamano)
-        self.OpenCV_image = cv2.resize(self.OpenCV_image, Tamano, interpolation=cv2.INTER_LINEAR)
-
-        # for i in self.viewer.Lista:
-        #    print (i)
-
-        QImageTemp = QtGui.QImage(cv2.cvtColor(self.OpenCV_image, cv2.COLOR_BGR2RGB), self.OpenCV_image.shape[1],
-                                  self.OpenCV_image.shape[0], self.OpenCV_image.shape[1] * 3,
-                                  QtGui.QImage.Format.Format_RGB888)
-
+        self.OpenCV_image3 = self.OpenCV_image.copy()
+        displaysize = (self.viewer.width(), self.viewer.height())
+        self.OpenCV_image3 = cv2.resize(self.OpenCV_image3, displaysize, interpolation=cv2.INTER_LINEAR)
+        QImageTemp = QtGui.QImage(
+            cv2.cvtColor(self.OpenCV_image3, cv2.COLOR_BGR2RGB),
+            self.OpenCV_image3.shape[1],
+            self.OpenCV_image3.shape[0],
+            self.OpenCV_image3.shape[1] * 3,
+            QtGui.QImage.Format.Format_RGB888
+        )
         pixmap = QtGui.QPixmap(QImageTemp)
         self.viewer.setPixmap(pixmap)
         self.viewer2.setPixmap(pixmap)
