@@ -35,8 +35,8 @@ class Window(QtWidgets.QWidget):
 
         self.viewer = MiEtiqueta()
         self.viewer2 = MiEtiqueta()
-        self.viewer.setFixedSize(440, 380)
-        self.viewer2.setFixedSize(440, 380)
+        self.viewer.setFixedSize(640, 580)
+        self.viewer2.setFixedSize(640, 580)
         self.viewer.setScaledContents(True)
         self.viewer2.setScaledContents(True)
 
