@@ -115,13 +115,12 @@ class Window(QtWidgets.QWidget):
         self.OpenCV_image2 = self.OpenCV_image.copy()
         hsv = cv2.cvtColor(self.OpenCV_image2, cv2.COLOR_BGR2HSV)
 
-        # Define color ranges for segmentation
         lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
         lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
         lower_blue, upper_blue = np.array([100, 150, 50]), np.array([140, 255, 255])
         lower_yellow, upper_yellow = np.array([15, 100, 100]), np.array([35, 255, 255])
+        lower_white, upper_white = np.array([0, 0, 210]), np.array([180, 30, 255])
 
-        # Create masks
         kernel = np.ones((5, 5), np.uint8)
         mask_red = cv2.inRange(hsv, lower_red1, upper_red1) + cv2.inRange(hsv, lower_red2, upper_red2)
         mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel)
@@ -132,12 +131,19 @@ class Window(QtWidgets.QWidget):
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
         mask_yellow = cv2.dilate(mask_yellow, kernel, iterations=1)
 
+        mask_white = cv2.inRange(hsv, lower_white, upper_white)
+        mask_white = cv2.morphologyEx(mask_white, cv2.MORPH_OPEN, kernel)
+        mask_white = cv2.dilate(mask_white, kernel, iterations=1)
+
         # Edge detection
         gray = cv2.cvtColor(self.OpenCV_image2, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         gray_clahe = clahe.apply(gray)
+        gray_clahe = cv2.GaussianBlur(gray_clahe, (5, 5), 0)
+        #gray_clahe = cv2.dilate(gray_clahe, kernel, iterations=3)
         edges = cv2.Canny(gray_clahe, 50, 150)
-        cv2.imshow("Clahe", gray_clahe)
+        #cv2.imshow("Clahe", gray_clahe)
+        #
         cv2.imshow("Edges", edges)
 
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -164,14 +170,13 @@ class Window(QtWidgets.QWidget):
             else:
                 continue
 
-            # Check color overlap
             contour_mask = np.zeros_like(gray)
             cv2.drawContours(contour_mask, [contour], -1, 255, -1)
 
             color_detected = None
-            color_thresholds = {"red": 0.1, "blue": 0.7, "yellow": 0.7}
+            color_thresholds = {"red": 0.04, "blue": 0.4, "yellow": 0.3, "white": 0.6}
 
-            for color_name, color_mask in [("red", mask_red), ("blue", mask_blue), ("yellow", mask_yellow)]:
+            for color_name, color_mask in [("red", mask_red), ("blue", mask_blue), ("yellow", mask_yellow), ("white", mask_white)]:
                 overlap = cv2.bitwise_and(contour_mask, color_mask)
                 overlap_area = cv2.countNonZero(overlap)
 
